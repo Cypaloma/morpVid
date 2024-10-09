@@ -1,3 +1,7 @@
+Here's the updated version with the thank you section and relevant links to documentation:
+
+---
+
 # morpVid: Streamlined Video Management 🎥🛠️
 
 morpVid is a partially automated tool designed to simplify the management of the average consumer's local video libraries. It handles encoding, anime upscaling, subtitle generation, and packaging into standardized MKV files with OPUS audio and ASS subtitles. Built on Arch Linux and CUDA 11.8, morpVid ensures consistent quality and reasonable file sizes across your entire collection.
@@ -50,6 +54,29 @@ morpVid takes care of multiple steps in video processing:
 
 Managing a diverse video library can be tedious—dealing with different formats, codecs, inconsistent resolutions, and missing or incorrect subtitles. I built morpVid to automate and standardize these processes. It allows me to optimize file size without compromising quality and ensures subtitles are consistently generated across my collection. The tool is especially useful for local backups, self-hosted media servers, or anyone needing an efficient, automated solution for video management. 💼
 
----
+## Thank You and Resources 🙏
 
-Hope you enjoy the little emoji enhancements! 🎉
+A huge thank you to all the developers and open-source projects that made morpVid possible! 🎉 If you’re interested in learning more or contributing to these amazing libraries, check out their documentation below:
+
+- **WhisperX** (for subtitle generation):  
+  [https://github.com/m-bain/whisperX](https://github.com/m-bain/whisperX)  
+  WhisperX is used to transcribe audio and generate subtitles with high accuracy, powered by Whisper Large v3.
+
+- **faster-whisper** (for optimized Whisper inference):  
+  [https://github.com/SYSTRAN/faster-whisper](https://github.com/SYSTRAN/faster-whisper)  
+  An optimized Whisper model for faster transcription, great for batch processing large video libraries.
+
+- **Real-ESRGAN** (for anime upscaling):  
+  [https://github.com/xinntao/Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN)  
+  [Anime Video Model Documentation](https://github.com/xinntao/Real-ESRGAN/blob/master/docs/anime_video_model.md)  
+  Real-ESRGAN is used to upscale anime videos with exceptional quality, especially when paired with the anime-specific model.
+
+- **CUDA 11.8** (for GPU-accelerated processing):  
+  [https://developer.nvidia.com/cuda-toolkit-archive](https://developer.nvidia.com/cuda-toolkit-archive)  
+  For faster GPU processing, morpVid leverages CUDA 11.8, but it will also work in CPU-only mode for those without NVIDIA GPUs.
+
+- **FFmpeg** (for video encoding and format conversion):  
+  [https://ffmpeg.org/](https://ffmpeg.org/)  
+  morpVid uses FFmpeg under the hood to handle all the video encoding and format conversions, ensuring high-quality results.
+
+Feel free to explore these resources for a deeper understanding of how morpVid integrates these technologies! 💻✨

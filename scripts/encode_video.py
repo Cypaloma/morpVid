@@ -105,7 +105,7 @@ def run_shell_command(command):
         if process.returncode != 0:
             logger.error(f"Command failed with return code {process.returncode}")
             logger.error(''.join(stderr_lines))
-            raise subprocess.CalledProcessError(process.returncode, command)
+            raise subprocess.CalledProcessError(process.returncode, command, output=''.join(stdout_lines), stderr=''.join(stderr_lines))
 
         # Log the outputs
         logger.debug(''.join(stdout_lines))
@@ -113,7 +113,7 @@ def run_shell_command(command):
 
     except subprocess.CalledProcessError as e:
         logger.error(f"Error running command: {' '.join(map(str, command))}")
-        logger.error(e)
+        logger.error(e.stderr)
         raise
 
 def get_video_fps(video_path):
@@ -196,33 +196,32 @@ def set_encoder_settings(config, input_video):
     }
 
     # Determine if hardware encoder is available
-    encoder = None
-    preset = 'medium'
-    use_crf = True
-
     hardware_encoder_name = hardware_encoders.get(video_codec)
     hardware_encoder_available = hardware_encoder_name and is_encoder_available(hardware_encoder_name)
 
-    if hardware_encoder_available:
-        encoder = hardware_encoder_name
-        logger.info(f"{Fore.GREEN}Hardware encoder {encoder} is available and will be used.")
-        preset = 'slow'  # Adjust as needed
-        use_crf = False  # For hardware encoders, we might use other quality controls
-    else:
-        encoder = software_encoders.get(video_codec)
-        if not encoder:
-            logger.error(f"Unsupported video codec: {video_codec}")
-            raise ValueError(f"Unsupported video codec: {video_codec}")
-        preset = 'veryslow' if quality_preset == 'High' else 'medium'
-        logger.info(f"{Fore.YELLOW}Hardware encoder not available. Using software encoder {encoder} with preset {preset}.")
-        use_crf = True  # Software encoders can use CRF
+    # Set software encoder name
+    software_encoder_name = software_encoders.get(video_codec)
+    if not software_encoder_name:
+        logger.error(f"Unsupported video codec: {video_codec}")
+        raise ValueError(f"Unsupported video codec: {video_codec}")
 
-    config['ffmpeg']['encoder'] = encoder
-    config['ffmpeg']['preset'] = preset
-    config['ffmpeg']['use_crf'] = use_crf
+    config['ffmpeg']['hardware_encoder'] = hardware_encoder_name
+    config['ffmpeg']['software_encoder'] = software_encoder_name
+
+    # Preset settings
+    if hardware_encoder_available:
+        config['ffmpeg']['encoder'] = hardware_encoder_name
+        config['ffmpeg']['preset'] = 'slow'  # Adjust as needed
+        config['ffmpeg']['use_crf'] = False  # For hardware encoders, we might use other quality controls
+        logger.info(f"{Fore.GREEN}Hardware encoder {hardware_encoder_name} is available and will be used.")
+    else:
+        config['ffmpeg']['encoder'] = software_encoder_name
+        config['ffmpeg']['preset'] = 'veryslow' if quality_preset == 'High' else 'medium'
+        config['ffmpeg']['use_crf'] = True  # Software encoders can use CRF
+        logger.info(f"{Fore.YELLOW}Hardware encoder not available. Using software encoder {software_encoder_name} with preset {config['ffmpeg']['preset']}.")
 
     # Now, set the encoding parameters based on the encoder and codec
-    if encoder in hardware_encoders.values():
+    if hardware_encoder_available:
         # Hardware encoder settings
         if video_codec == 'h265':
             # Use constqp mode for hevc_nvenc
@@ -385,111 +384,179 @@ def stitch_frames_to_video(frames_dir, output_video_path, fps, extracted_subtitl
 
     frame_pattern = os.path.join(frames_dir, 'frame%08d.png')
 
-    encoder = config['ffmpeg']['encoder']
-    preset = config['ffmpeg']['preset']
     audio_codec = config['ffmpeg']['audio_codec']
     audio_bitrate = config['ffmpeg']['audio_bitrate']
 
-    cmd = ['ffmpeg', '-y', '-framerate', str(fps), '-i', frame_pattern, '-i', config['input_video']]
+    # Build the base ffmpeg command
+    base_cmd = ['ffmpeg', '-y', '-framerate', str(fps), '-i', frame_pattern, '-i', config['input_video']]
 
     # Include subtitles
     for subtitle_file in extracted_subtitles:
-        cmd.extend(['-i', subtitle_file])
+        base_cmd.extend(['-i', subtitle_file])
 
     # Map streams
-    cmd.extend(['-map', '0:v', '-map', '1:a?'])
+    base_cmd.extend(['-map', '0:v', '-map', '1:a?'])
     for idx, subtitle_file in enumerate(extracted_subtitles):
-        cmd.extend(['-map', f'{idx + 2}:0'])
-
-    # Video encoding settings
-    cmd.extend(['-c:v', encoder, '-preset', preset])
-
-    # Set encoding parameters based on config
-    if 'rc' in config['ffmpeg']:
-        cmd.extend(['-rc:v', config['ffmpeg']['rc']])
-
-    if 'qp' in config['ffmpeg']:
-        cmd.extend(['-qp', str(config['ffmpeg']['qp'])])
-    elif 'cq' in config['ffmpeg']:
-        cmd.extend(['-cq', str(config['ffmpeg']['cq'])])
-    elif 'crf' in config['ffmpeg']:
-        cmd.extend(['-crf', str(config['ffmpeg']['crf'])])
-
-    if 'target_bitrate' in config['ffmpeg']:
-        cmd.extend(['-b:v', str(config['ffmpeg']['target_bitrate'])])
-        # Optionally set maxrate and bufsize
-        maxrate = int(config['ffmpeg']['target_bitrate'] * 1.5)
-        bufsize = int(config['ffmpeg']['target_bitrate'] * 2)
-        cmd.extend(['-maxrate', str(maxrate), '-bufsize', str(bufsize)])
-
-    # Audio encoding settings
-    cmd.extend(['-c:a', audio_codec, '-b:a', str(audio_bitrate)])
-
-    # Subtitle codec
-    cmd.extend(['-c:s', 'copy'])
+        base_cmd.extend(['-map', f'{idx + 2}:0'])
 
     # Preserve chapters and metadata
-    cmd.extend(['-map_metadata', '1', '-map_chapters', '1'])
+    base_cmd.extend(['-map_metadata', '1', '-map_chapters', '1'])
+
+    # Audio encoding settings
+    base_cmd.extend(['-c:a', audio_codec, '-b:a', str(audio_bitrate)])
+
+    # Subtitle codec
+    base_cmd.extend(['-c:s', 'copy'])
 
     # Output file
-    cmd.extend([str(output_video_path)])
+    base_cmd.extend([str(output_video_path)])
 
-    run_shell_command(cmd)
+    # Attempt hardware encoding first
+    try:
+        logger.info("Attempting hardware encoding with FFmpeg...")
+        cmd_hw = base_cmd.copy()
+
+        encoder = config['ffmpeg']['hardware_encoder']
+        preset = config['ffmpeg']['preset']
+
+        # Video encoding settings for hardware encoding
+        cmd_hw.extend(['-c:v', encoder, '-preset', preset])
+
+        # Set encoding parameters based on config
+        if 'rc' in config['ffmpeg']:
+            cmd_hw.extend(['-rc:v', config['ffmpeg']['rc']])
+
+        if 'qp' in config['ffmpeg']:
+            cmd_hw.extend(['-qp', str(config['ffmpeg']['qp'])])
+        elif 'cq' in config['ffmpeg']:
+            cmd_hw.extend(['-cq', str(config['ffmpeg']['cq'])])
+        elif 'crf' in config['ffmpeg']:
+            cmd_hw.extend(['-crf', str(config['ffmpeg']['crf'])])
+
+        if 'target_bitrate' in config['ffmpeg']:
+            cmd_hw.extend(['-b:v', str(config['ffmpeg']['target_bitrate'])])
+            # Optionally set maxrate and bufsize
+            maxrate = int(config['ffmpeg']['target_bitrate'] * 1.5)
+            bufsize = int(config['ffmpeg']['target_bitrate'] * 2)
+            cmd_hw.extend(['-maxrate', str(maxrate), '-bufsize', str(bufsize)])
+
+        # Run the hardware encoding command
+        run_shell_command(cmd_hw)
+        logger.info("Hardware encoding completed successfully.")
+
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Hardware encoding failed: {e.stderr}")
+        logger.info("Falling back to software encoding.")
+
+        # Now attempt software encoding
+        cmd_sw = base_cmd.copy()
+
+        encoder = config['ffmpeg']['software_encoder']
+        preset = config['ffmpeg']['preset']
+
+        # Video encoding settings for software encoding
+        cmd_sw.extend(['-c:v', encoder, '-preset', preset])
+
+        if 'crf' in config['ffmpeg']:
+            cmd_sw.extend(['-crf', str(config['ffmpeg']['crf'])])
+
+        # Run the software encoding command
+        try:
+            run_shell_command(cmd_sw)
+            logger.info("Software encoding completed successfully.")
+        except subprocess.CalledProcessError as e_sw:
+            logger.error(f"Software encoding failed: {e_sw.stderr}")
+            logger.error("Failed to encode video with both hardware and software encoders.")
+            raise
 
 def assemble_video_without_upscaling(input_video, output_video_path, extracted_subtitles, config):
     """Assemble video without upscaling frames."""
     logger.info(f"Assembling video without upscaling for {input_video}")
 
-    encoder = config['ffmpeg']['encoder']
-    preset = config['ffmpeg']['preset']
     audio_codec = config['ffmpeg']['audio_codec']
     audio_bitrate = config['ffmpeg']['audio_bitrate']
 
-    cmd = ['ffmpeg', '-y', '-i', input_video]
+    # Build the base ffmpeg command
+    base_cmd = ['ffmpeg', '-y', '-i', input_video]
 
     # Include subtitles
     for subtitle_file in extracted_subtitles:
-        cmd.extend(['-i', subtitle_file])
+        base_cmd.extend(['-i', subtitle_file])
 
     # Map streams
-    cmd.extend(['-map', '0:v', '-map', '0:a?'])
+    base_cmd.extend(['-map', '0:v', '-map', '0:a?'])
     for idx, subtitle_file in enumerate(extracted_subtitles):
-        cmd.extend(['-map', f'{idx + 1}:0'])
-
-    # Video encoding settings
-    cmd.extend(['-c:v', encoder, '-preset', preset])
-
-    # Set encoding parameters based on config
-    if 'rc' in config['ffmpeg']:
-        cmd.extend(['-rc:v', config['ffmpeg']['rc']])
-
-    if 'qp' in config['ffmpeg']:
-        cmd.extend(['-qp', str(config['ffmpeg']['qp'])])
-    elif 'cq' in config['ffmpeg']:
-        cmd.extend(['-cq', str(config['ffmpeg']['cq'])])
-    elif 'crf' in config['ffmpeg']:
-        cmd.extend(['-crf', str(config['ffmpeg']['crf'])])
-
-    if 'target_bitrate' in config['ffmpeg']:
-        cmd.extend(['-b:v', str(config['ffmpeg']['target_bitrate'])])
-        # Optionally set maxrate and bufsize
-        maxrate = int(config['ffmpeg']['target_bitrate'] * 1.5)
-        bufsize = int(config['ffmpeg']['target_bitrate'] * 2)
-        cmd.extend(['-maxrate', str(maxrate), '-bufsize', str(bufsize)])
-
-    # Audio encoding settings
-    cmd.extend(['-c:a', audio_codec, '-b:a', str(audio_bitrate)])
-
-    # Subtitle codec
-    cmd.extend(['-c:s', 'copy'])
+        base_cmd.extend(['-map', f'{idx + 1}:0'])
 
     # Preserve chapters and metadata
-    cmd.extend(['-map_metadata', '0', '-map_chapters', '0'])
+    base_cmd.extend(['-map_metadata', '0', '-map_chapters', '0'])
+
+    # Audio encoding settings
+    base_cmd.extend(['-c:a', audio_codec, '-b:a', str(audio_bitrate)])
+
+    # Subtitle codec
+    base_cmd.extend(['-c:s', 'copy'])
 
     # Output file
-    cmd.extend([str(output_video_path)])
+    base_cmd.extend([str(output_video_path)])
 
-    run_shell_command(cmd)
+    # Attempt hardware encoding first
+    try:
+        logger.info("Attempting hardware encoding with FFmpeg...")
+        cmd_hw = base_cmd.copy()
+
+        encoder = config['ffmpeg']['hardware_encoder']
+        preset = config['ffmpeg']['preset']
+
+        # Video encoding settings for hardware encoding
+        cmd_hw.extend(['-c:v', encoder, '-preset', preset])
+
+        # Set encoding parameters based on config
+        if 'rc' in config['ffmpeg']:
+            cmd_hw.extend(['-rc:v', config['ffmpeg']['rc']])
+
+        if 'qp' in config['ffmpeg']:
+            cmd_hw.extend(['-qp', str(config['ffmpeg']['qp'])])
+        elif 'cq' in config['ffmpeg']:
+            cmd_hw.extend(['-cq', str(config['ffmpeg']['cq'])])
+        elif 'crf' in config['ffmpeg']:
+            cmd_hw.extend(['-crf', str(config['ffmpeg']['crf'])])
+
+        if 'target_bitrate' in config['ffmpeg']:
+            cmd_hw.extend(['-b:v', str(config['ffmpeg']['target_bitrate'])])
+            # Optionally set maxrate and bufsize
+            maxrate = int(config['ffmpeg']['target_bitrate'] * 1.5)
+            bufsize = int(config['ffmpeg']['target_bitrate'] * 2)
+            cmd_hw.extend(['-maxrate', str(maxrate), '-bufsize', str(bufsize)])
+
+        # Run the hardware encoding command
+        run_shell_command(cmd_hw)
+        logger.info("Hardware encoding completed successfully.")
+
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Hardware encoding failed: {e.stderr}")
+        logger.info("Falling back to software encoding.")
+
+        # Now attempt software encoding
+        cmd_sw = base_cmd.copy()
+
+        encoder = config['ffmpeg']['software_encoder']
+        preset = config['ffmpeg']['preset']
+
+        # Video encoding settings for software encoding
+        cmd_sw.extend(['-c:v', encoder, '-preset', preset])
+
+        if 'crf' in config['ffmpeg']:
+            cmd_sw.extend(['-crf', str(config['ffmpeg']['crf'])])
+
+        # Run the software encoding command
+        try:
+            run_shell_command(cmd_sw)
+            logger.info("Software encoding completed successfully.")
+        except subprocess.CalledProcessError as e_sw:
+            logger.error(f"Software encoding failed: {e_sw.stderr}")
+            logger.error("Failed to encode video with both hardware and software encoders.")
+            raise
 
 def process_videos(config, input_video, frames_dir):
     output_dir = config['output']['folder']
@@ -535,6 +602,8 @@ def main():
             'audio_bitrate': None,  # Will be set dynamically
             'preset': 'veryslow',   # Will be adjusted based on codec
             'encoder': '',          # Will be set dynamically
+            'hardware_encoder': '', # Will be set dynamically
+            'software_encoder': '', # Will be set dynamically
             'crf': None,            # Will be set dynamically
             'target_bitrate': None, # Will be set dynamically
             'use_crf': True,        # Will be set dynamically

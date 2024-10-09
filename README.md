@@ -26,7 +26,7 @@ morpVid takes care of multiple steps in video processing:
 
 ## Installation 💻
 
-1. **Install CUDA 11.8**  
+1. **Install CUDA 11.8 & cudnn 8.7**  
    *Optional, but recommended for faster GPU processing; the tool will fall back to CPU if CUDA is unavailable, at a reduced speed.* ⚡
 
 2. **Download the ZIP** 📦  

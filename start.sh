@@ -21,6 +21,10 @@ if [ "$CONDA_PREFIX" != "$PROJECT_ROOT/dependencies/envs/anime_upscale_env" ]; t
     exit 1
 fi
 
+# Export LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+echo "LD_LIBRARY_PATH is set to: $LD_LIBRARY_PATH"
+
 # Run the main.py script using the active environment
 echo "Running main.py..."
 python "$MAIN_SCRIPT"

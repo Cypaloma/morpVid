@@ -2,6 +2,8 @@
 
 morpVid is a partially automated tool designed to simplify the management of the average consumer's local video libraries. It handles encoding, anime upscaling, subtitle generation, and packaging into standardized MKV files with OPUS audio and ASS subtitles. Built on Arch Linux and CUDA 11.8, morpVid ensures consistent quality and reasonable file sizes across your entire collection.
 
+If you're able and would like to, checking out my Kofi would be a massive help. https://ko-fi.com/cypaloma
+
 ## Overview 🌟
 
 With morpVid, you can automate the processing of all incoming video files. The tool allows you to standardize quality, ensure efficient compression, and optionally generate subtitles or upscale anime videos. morpVid asks for minimal input and then processes each valid video file in the specified directory based on your preferences.

@@ -31,10 +31,9 @@ fi
 # Activate the anime_upscale_env environment
 conda activate "$ENV_DIR"
 
-# Install necessary packages in anime_upscale_env (if any)
-# You can add any package installations here
-# Example:
-# conda install -y numpy pandas
+# Install necessary packages in anime_upscale_env
+echo "Installing required packages in anime_upscale_env..."
+pip install colorama
 
 # Deactivate the anime_upscale_env environment
 conda deactivate
@@ -52,3 +51,5 @@ else
     echo "Error: setup_whisperx_env.sh script not found at $WHISPERX_SETUP_SCRIPT."
     exit 1
 fi
+
+echo "Setup completed successfully."

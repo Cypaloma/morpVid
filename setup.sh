@@ -1,58 +1,54 @@
 #!/bin/bash
 
-# Get the absolute path of the script and the project root
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR" && pwd)"
+# Define the installation directory relative to the script location
+PROJECT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+DEPENDENCIES_DIR="$PROJECT_DIR/dependencies"
+MINICONDA_DIR="$DEPENDENCIES_DIR/miniconda3"
 
-# Define the path to the `scripts` directory
-SCRIPTS_DIR="$PROJECT_ROOT/scripts"
-
-# Check if the scripts directory exists
-if [ ! -d "$SCRIPTS_DIR" ]; then
-    echo "Error: scripts directory not found at $SCRIPTS_DIR."
-    exit 1
+# Download Miniconda installer
+if [ ! -f "$DEPENDENCIES_DIR/Miniconda3-latest-Linux-x86_64.sh" ]; then
+    mkdir -p "$DEPENDENCIES_DIR"
+    wget -O "$DEPENDENCIES_DIR/Miniconda3-latest-Linux-x86_64.sh" https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
 fi
 
-# Paths to environment setup scripts inside the /scripts folder
-ANIME_ENV_SETUP="$SCRIPTS_DIR/setup_anime_upscale_env.sh"
-WHISPERX_ENV_SETUP="$SCRIPTS_DIR/setup_whisperx_env.sh"
-
-# Check if setup scripts exist
-if [ ! -f "$ANIME_ENV_SETUP" ]; then
-    echo "Error: Anime upscale setup script not found at $ANIME_ENV_SETUP."
-    exit 1
+# Install Miniconda to the specified directory
+if [ ! -d "$MINICONDA_DIR" ]; then
+    bash "$DEPENDENCIES_DIR/Miniconda3-latest-Linux-x86_64.sh" -b -p "$MINICONDA_DIR"
 fi
 
-if [ ! -f "$WHISPERX_ENV_SETUP" ]; then
-    echo "Error: WhisperX setup script not found at $WHISPERX_ENV_SETUP."
-    exit 1
+# Initialize conda from the local installation
+source "$MINICONDA_DIR/etc/profile.d/conda.sh"
+
+# Update conda
+conda update -n base -c defaults conda -y
+
+# Create the anime_upscale_env environment in the project directory
+ENV_DIR="$DEPENDENCIES_DIR/envs/anime_upscale_env"
+if [ ! -d "$ENV_DIR" ]; then
+    conda create -p "$ENV_DIR" python=3.10 -y
 fi
 
-# Run the setup scripts for both environments
-echo "Setting up the anime upscale environment..."
-bash "$ANIME_ENV_SETUP"
+# Activate the anime_upscale_env environment
+conda activate "$ENV_DIR"
 
-echo "Setting up the WhisperX environment..."
-bash "$WHISPERX_ENV_SETUP"
+# Install necessary packages in anime_upscale_env (if any)
+# You can add any package installations here
+# Example:
+# conda install -y numpy pandas
 
-# Activate anime upscale environment and install colorama
-echo "Activating anime upscale environment and installing colorama..."
-source "$PROJECT_ROOT/dependencies/miniconda/bin/activate" "$PROJECT_ROOT/dependencies/envs/anime_upscale_env"
-if [ "$CONDA_PREFIX" != "$PROJECT_ROOT/dependencies/envs/anime_upscale_env" ]; then
-    echo "Failed to activate anime upscale environment."
-    exit 1
+# Deactivate the anime_upscale_env environment
+conda deactivate
+
+# Call the setup_whisperx_env.sh script
+WHISPERX_SETUP_SCRIPT="$PROJECT_DIR/scripts/setup_whisperx_env.sh"
+
+if [ -f "$WHISPERX_SETUP_SCRIPT" ]; then
+    echo "Running setup_whisperx_env.sh script..."
+    # Make sure the script is executable
+    chmod +x "$WHISPERX_SETUP_SCRIPT"
+    # Execute the script
+    bash "$WHISPERX_SETUP_SCRIPT"
 else
-    pip install colorama
-fi
-
-# Activate WhisperX environment and install colorama
-echo "Activating WhisperX environment and installing colorama..."
-source "$PROJECT_ROOT/dependencies/miniconda/bin/activate" "$PROJECT_ROOT/dependencies/envs/whisperx_env"
-if [ "$CONDA_PREFIX" != "$PROJECT_ROOT/dependencies/envs/whisperx_env" ]; then
-    echo "Failed to activate WhisperX environment."
+    echo "Error: setup_whisperx_env.sh script not found at $WHISPERX_SETUP_SCRIPT."
     exit 1
-else
-    pip install colorama
 fi
-
-echo "All environments set up and colorama installed."

@@ -152,7 +152,6 @@ def determine_scaling_options(width, height):
 
     return scaling_options
 
-
 def main():
     # Activate anime upscale environment at the very beginning
     activate_anime_upscale_env()
@@ -182,13 +181,15 @@ def main():
         print(f"{Fore.YELLOW}No supported media files found in the specified folder.")
         return
 
-    # Collect user preferences
+    # Collect user preferences once and apply to all files
     log_info("Collecting user preferences.")
 
     # Upscaling options
     upscale_choice = input("Do you want to upscale the videos? (yes/no): ").strip().lower()
+    scaling_factors = {}
+
     if upscale_choice in ["yes", "y"]:
-        scaling_factors = {}
+        # Determine scaling factors for each file based on user input
         for input_file in input_files:
             width, height, codec = extract_video_info(input_file)
             if width is None or height is None:
@@ -201,21 +202,25 @@ def main():
                 print(f"{Fore.YELLOW}No upscaling options available for this video.")
                 continue
 
-            print("Select target resolution:")
-            for idx, (res_name, scale_factor) in enumerate(scaling_options.items(), start=1):
-                print(f"{idx}. {res_name} ({scale_factor}x upscale)")
+            # Collect scaling choice once
+            if not scaling_factors:  # Only prompt for the first video
+                print("Select target resolution:")
+                for idx, (res_name, scale_factor) in enumerate(scaling_options.items(), start=1):
+                    print(f"{idx}. {res_name} ({scale_factor}x upscale)")
 
-            choice = input("Enter the number corresponding to your choice: ").strip()
-            try:
-                choice_idx = int(choice)
-                res_name = list(scaling_options.keys())[choice_idx - 1]
-                scale_factor = scaling_options[res_name]
-                scaling_factors[input_file] = scale_factor
-            except (ValueError, IndexError):
-                print(f"{Fore.YELLOW}Invalid choice. Skipping this video.")
-                log_error(f"Invalid resolution choice provided for {input_file}.")
-                continue
-
+                choice = input("Enter the number corresponding to your choice: ").strip()
+                try:
+                    choice_idx = int(choice)
+                    res_name = list(scaling_options.keys())[choice_idx - 1]
+                    scale_factor = scaling_options[res_name]
+                    scaling_factors[input_file] = scale_factor
+                except (ValueError, IndexError):
+                    print(f"{Fore.YELLOW}Invalid choice. Skipping upscaling.")
+                    log_error(f"Invalid resolution choice provided.")
+                    scaling_factors = {}
+                    break
+            else:
+                scaling_factors[input_file] = scaling_factors[input_files[0]]  # Apply same scaling factor
     else:
         scaling_factors = {}
 
@@ -254,7 +259,7 @@ def main():
     generate_subtitles_script = SCRIPTS_DIR / 'generate_subtitles_whisperx.py'
     encode_video_script = SCRIPTS_DIR / 'encode_video.py'
 
-    # Process each video file
+    # Process each video file with the same settings
     for input_file in input_files:
         log_info(f"Processing file: {input_file}")
         video_name = input_file.stem
@@ -315,7 +320,6 @@ def main():
         run_command(encode_command, "anime_upscale_env")
 
     log_info(f"{Fore.GREEN}All files processed.")
-
 
 if __name__ == "__main__":
     main()

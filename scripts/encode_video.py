@@ -77,43 +77,45 @@ def run_shell_command(command):
     """Run a shell command with logging and tqdm progress bar."""
     try:
         logger.info(f"Running command: {' '.join(map(str, command))}")
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
 
-        # Read stdout and stderr
+        # Merge stderr into stdout and set line buffering
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            universal_newlines=True,
+            bufsize=1
+        )
+
+        # Read stdout
         stdout_lines = []
-        stderr_lines = []
 
         # Use tqdm for progress bar
         with tqdm(total=100, desc="Processing", unit="%", ncols=80) as pbar:
-            while True:
-                output = process.stdout.readline()
-                error = process.stderr.readline()
-
-                if output:
-                    stdout_lines.append(output)
-                    tqdm.write(output.strip())
-                if error:
-                    stderr_lines.append(error)
-                    tqdm.write(error.strip())
-                if output == '' and error == '' and process.poll() is not None:
-                    break
-
+            for line in process.stdout:
+                stdout_lines.append(line)
+                tqdm.write(line.strip())
                 pbar.update(0)  # Keeps the progress bar displayed
 
+        # Wait for the process to finish
         process.wait()
 
         if process.returncode != 0:
             logger.error(f"Command failed with return code {process.returncode}")
-            logger.error(''.join(stderr_lines))
-            raise subprocess.CalledProcessError(process.returncode, command, output=''.join(stdout_lines), stderr=''.join(stderr_lines))
+            logger.error(''.join(stdout_lines))
+            raise subprocess.CalledProcessError(
+                process.returncode,
+                command,
+                output=''.join(stdout_lines),
+                stderr=''
+            )
 
         # Log the outputs
         logger.debug(''.join(stdout_lines))
-        logger.debug(''.join(stderr_lines))
 
     except subprocess.CalledProcessError as e:
         logger.error(f"Error running command: {' '.join(map(str, command))}")
-        logger.error(e.stderr)
+        logger.error(e.output)
         raise
 
 def get_video_fps(video_path):

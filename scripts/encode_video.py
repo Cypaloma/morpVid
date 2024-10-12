@@ -13,7 +13,7 @@ try:
     init(autoreset=True)
 except ImportError:
     print("Please install colorama for colored CLI output: pip install colorama")
-    exit(1)
+    sys.exit(1)
 
 # Setup logging with date and time stamps in the log file name
 log_folder = Path("./output/logs").resolve()
@@ -51,12 +51,14 @@ else:
 METADATA_FILE = 'metadata.json'
 
 def load_metadata():
+    """Load metadata from the metadata file."""
     if os.path.exists(METADATA_FILE):
         with open(METADATA_FILE, 'r') as f:
             return json.load(f)
-        return {}
+    return {}
 
 def detect_cuda_device():
+    """Check if a CUDA-capable device is available."""
     try:
         result = subprocess.run(['nvidia-smi'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         return result.returncode == 0
@@ -64,6 +66,7 @@ def detect_cuda_device():
         return False
 
 def is_encoder_available(encoder_name):
+    """Check if the specified encoder is available in FFmpeg."""
     try:
         result = subprocess.run(['ffmpeg', '-hide_banner', '-encoders'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         encoders_output = result.stdout
@@ -81,6 +84,7 @@ def is_encoder_available(encoder_name):
         return False
 
 def run_shell_command(command):
+    """Run a shell command with real-time output and error handling."""
     try:
         logger.info(f"Running command: {' '.join(map(str, command))}")
         process = subprocess.Popen(
@@ -96,6 +100,7 @@ def run_shell_command(command):
                 stdout_lines.append(line)
                 tqdm.write(line.strip())
                 pbar.update(0)
+            process.stdout.close()
         process.wait()
         if process.returncode != 0:
             logger.error(f"Command failed with return code {process.returncode}")
@@ -113,6 +118,7 @@ def run_shell_command(command):
         raise
 
 def get_video_resolution(video_path):
+    """Get the resolution (width and height) of the input video."""
     cmd = [
         'ffprobe', '-v', 'error', '-select_streams', 'v:0',
         '-show_entries', 'stream=width,height',
@@ -125,6 +131,7 @@ def get_video_resolution(video_path):
     return width, height
 
 def get_video_fps(video_path):
+    """Get the frames per second (fps) of the input video."""
     cmd = [
         'ffprobe', '-v', 'error', '-select_streams', 'v:0',
         '-print_format', 'json', '-show_entries',
@@ -139,6 +146,7 @@ def get_video_fps(video_path):
     return fps
 
 def get_video_duration(video_path):
+    """Get the duration of the input video in seconds."""
     cmd = [
         'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
         '-of', 'default=noprint_wrappers=1:nokey=1',
@@ -149,6 +157,7 @@ def get_video_duration(video_path):
     return float(output)
 
 def get_video_bitrate(video_path):
+    """Get the bitrate of the input video stream."""
     cmd = [
         'ffprobe', '-v', 'error', '-select_streams', 'v:0',
         '-show_entries', 'stream=bit_rate', '-of', 'default=noprint_wrappers=1:nokey=1',
@@ -170,6 +179,7 @@ def get_video_bitrate(video_path):
     return int(float(output))
 
 def get_audio_bitrate(video_path):
+    """Get the total bitrate of all audio streams in the input video."""
     cmd = [
         'ffprobe', '-v', 'error', '-select_streams', 'a',
         '-show_entries', 'stream=bit_rate', '-of', 'default=noprint_wrappers=1:nokey=1',
@@ -178,7 +188,7 @@ def get_audio_bitrate(video_path):
     result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     outputs = result.stdout.strip().split('\n')
     if not outputs or outputs[0] == 'N/A' or outputs[0] == '':
-        # Default to 128 kbps if bitrate not available
+        # Default to 256 kbps if bitrate not available
         logger.warning("Audio bitrate not available, defaulting to 256000 bps")
         return 256000
     # Sum the bitrates of all audio streams
@@ -186,7 +196,19 @@ def get_audio_bitrate(video_path):
     logger.info(f"Total audio bitrate: {total_bitrate} bps")
     return total_bitrate
 
+def get_audio_channel_layout(video_path):
+    """Get the channel layout of the first audio stream."""
+    cmd = [
+        'ffprobe', '-v', 'error', '-select_streams', 'a:0',
+        '-show_entries', 'stream=channel_layout', '-of', 'default=noprint_wrappers=1:nokey=1',
+        str(video_path)
+    ]
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    output = result.stdout.strip()
+    return output
+
 def calculate_target_bitrate(width, height, fps, quality_preset, video_codec):
+    """Calculate the target video bitrate based on resolution, fps, and quality preset."""
     # Base bitrate calculation based on resolution and fps
     base_bitrate = width * height * fps * 0.07  # This factor can be adjusted
     # Quality multipliers
@@ -198,8 +220,9 @@ def calculate_target_bitrate(width, height, fps, quality_preset, video_codec):
     return int(adjusted_bitrate), int(maxrate), int(bufsize)  # Return as integers
 
 def set_encoder_settings(config, input_video):
-    video_codec = config['ffmpeg']['video_codec']
-    quality_preset = config['ffmpeg']['quality_preset']
+    """Set encoder settings based on the input video and configuration."""
+    video_codec = config['video_codec']
+    quality_preset = config['quality_preset']
     width, height = get_video_resolution(input_video)
     fps = get_video_fps(input_video)
     config['resolution'] = f"{width}x{height}"
@@ -225,51 +248,50 @@ def set_encoder_settings(config, input_video):
         logger.error(f"Unsupported video codec: {video_codec}")
         raise ValueError(f"Unsupported video codec: {video_codec}")
 
-    config['ffmpeg']['hardware_encoder'] = hardware_encoder_name
-    config['ffmpeg']['software_encoder'] = software_encoder_name
+    config['hardware_encoder'] = hardware_encoder_name
+    config['software_encoder'] = software_encoder_name
 
     if hardware_encoder_available:
-        config['ffmpeg']['encoder'] = hardware_encoder_name
-        config['ffmpeg']['preset'] = 'slow'
-        config['ffmpeg']['use_crf'] = False
+        config['encoder'] = hardware_encoder_name
+        config['preset'] = 'slow'
+        config['use_crf'] = False
         logger.info(f"{Fore.GREEN}Hardware encoder {hardware_encoder_name} is available and will be used.")
     else:
-        config['ffmpeg']['encoder'] = software_encoder_name
-        config['ffmpeg']['preset'] = 'veryslow' if quality_preset == 'High' else 'medium'
-        config['ffmpeg']['use_crf'] = True
-        logger.info(f"{Fore.YELLOW}Hardware encoder not available. Using software encoder {software_encoder_name} with preset {config['ffmpeg']['preset']}.")
+        config['encoder'] = software_encoder_name
+        config['preset'] = 'veryslow' if quality_preset == 'High' else 'medium'
+        config['use_crf'] = True
+        logger.info(f"{Fore.YELLOW}Hardware encoder not available. Using software encoder {software_encoder_name} with preset {config['preset']}.")
 
     # Calculate target bitrate
     target_bitrate, maxrate, bufsize = calculate_target_bitrate(
         width, height, fps, quality_preset, video_codec
     )
-    config['ffmpeg']['target_bitrate'] = target_bitrate
-    config['ffmpeg']['maxrate'] = maxrate
-    config['ffmpeg']['bufsize'] = bufsize
+    config['target_bitrate'] = target_bitrate
+    config['maxrate'] = maxrate
+    config['bufsize'] = bufsize
 
     # Adjust target bitrate if source bitrate is lower
     source_bitrate = get_video_bitrate(input_video)
-    if source_bitrate and source_bitrate < config['ffmpeg']['target_bitrate']:
+    if source_bitrate and source_bitrate < config['target_bitrate']:
         buffer = int(source_bitrate * 0.15)
         adjusted_bitrate = source_bitrate + buffer
-        config['ffmpeg']['target_bitrate'] = adjusted_bitrate
+        config['target_bitrate'] = adjusted_bitrate
         logger.info(f"Adjusted video bitrate to source bitrate + buffer: {adjusted_bitrate} bps")
     else:
-        logger.info(f"Using target bitrate {config['ffmpeg']['target_bitrate']} bps for quality preset {quality_preset}")
+        logger.info(f"Using target bitrate {config['target_bitrate']} bps for quality preset {quality_preset}")
 
     if hardware_encoder_available:
-        if video_codec == 'h265' or video_codec == 'h264':
-            config['ffmpeg']['rc'] = 'vbr_hq'
-            config['ffmpeg']['cq'] = None
+        if video_codec in ['h265', 'h264']:
+            config['rc'] = 'vbr_hq'
             cq_values = {'Low': 28, 'Regular': 23, 'High': 18}
             cq = cq_values[quality_preset]
-            config['ffmpeg']['cq'] = cq
+            config['cq'] = cq
             logger.info(f"Using CQ {cq} for quality preset {quality_preset}")
         elif video_codec == 'AV1':
-            config['ffmpeg']['rc'] = 'vbr'
+            config['rc'] = 'vbr'
             cq_values = {'Low': 40, 'Regular': 35, 'High': 30}
             cq = cq_values[quality_preset]
-            config['ffmpeg']['cq'] = cq
+            config['cq'] = cq
             logger.info(f"Using CQ {cq} for quality preset {quality_preset}")
     else:
         # Only set 'crf' if using software encoder
@@ -277,16 +299,26 @@ def set_encoder_settings(config, input_video):
             crf_values = {'Low': 40, 'Regular': 35, 'High': 30}
         else:
             crf_values = {'Low': 28, 'Regular': 23, 'High': 18}
-        config['ffmpeg']['crf'] = crf_values[quality_preset]
-        logger.info(f"Using CRF {config['ffmpeg']['crf']} for quality preset {quality_preset}")
+        config['crf'] = crf_values[quality_preset]
+        logger.info(f"Using CRF {config['crf']} for quality preset {quality_preset}")
 
     # Get audio bitrate
     source_audio_bitrate = get_audio_bitrate(input_video)
     target_audio_bitrate = source_audio_bitrate + int(source_audio_bitrate * 0.15)
-    config['ffmpeg']['audio_bitrate'] = target_audio_bitrate
+    config['audio_bitrate'] = target_audio_bitrate
     logger.info(f"Adjusted audio bitrate to source bitrate + buffer: {target_audio_bitrate} bps")
 
-    logger.info(f"Final encoder settings: {config['ffmpeg']}")
+    # Get audio channel layout
+    audio_channel_layout = get_audio_channel_layout(input_video)
+    unsupported_layouts = ['5.1(side)', '7.1', '7.1(wide)', '6.1']
+
+    if audio_channel_layout in unsupported_layouts:
+        logger.warning(f"Audio channel layout '{audio_channel_layout}' is not supported by Opus. Using AAC instead.")
+        config['audio_codec'] = 'aac'  # Or 'libfdk_aac' if available
+    else:
+        config['audio_codec'] = 'libopus'
+
+    logger.info(f"Final encoder settings: {config}")
 
 def extract_stream_metadata(input_video):
     """Extract metadata for all streams using ffprobe."""
@@ -299,6 +331,7 @@ def extract_stream_metadata(input_video):
     return info.get('streams', [])
 
 def extract_and_convert_subtitles(input_video, subtitles_dir):
+    """Extract and convert subtitles from the input video."""
     logger.info(f"Extracting subtitles from {input_video}")
     os.makedirs(subtitles_dir, exist_ok=True)
     streams_info = extract_stream_metadata(input_video)
@@ -310,10 +343,32 @@ def extract_and_convert_subtitles(input_video, subtitles_dir):
     subtitles_metadata = []
     for idx, stream in enumerate(subtitle_streams):
         stream_index = stream['index']
-        subtitle_file = os.path.join(subtitles_dir, f'subtitle_{idx + 1}.ass')
-        cmd = [
-            'ffmpeg', '-y', '-i', input_video, '-map', f'0:{stream_index}', '-c:s', 'ass', subtitle_file
-        ]
+        codec_name = stream.get('codec_name', '')
+        # Determine the appropriate file extension
+        if codec_name in ['ass', 'srt', 'subrip', 'webvtt', 'ssa', 'microdvd', 'subviewer', 'text']:
+            # Text-based subtitles can be converted to ASS
+            subtitle_file = os.path.join(subtitles_dir, f'subtitle_{idx + 1}.ass')
+            cmd = [
+                'ffmpeg', '-y', '-i', input_video, '-map', f'0:{stream_index}', '-c:s', 'ass', subtitle_file
+            ]
+            output_codec = 'ass'
+        elif codec_name == 'hdmv_pgs_subtitle':
+            # For PGS subtitles, use .sup extension
+            subtitle_file = os.path.join(subtitles_dir, f'subtitle_{idx + 1}.sup')
+            cmd = [
+                'ffmpeg', '-y', '-i', input_video, '-map', f'0:{stream_index}', '-c:s', 'copy', subtitle_file
+            ]
+            output_codec = 'pgs'
+        elif codec_name == 'dvd_subtitle':
+            # For DVD subtitles, use .sub extension
+            subtitle_file = os.path.join(subtitles_dir, f'subtitle_{idx + 1}.sub')
+            cmd = [
+                'ffmpeg', '-y', '-i', input_video, '-map', f'0:{stream_index}', '-c:s', 'copy', subtitle_file
+            ]
+            output_codec = 'dvd_subtitle'
+        else:
+            logger.warning(f"Unsupported subtitle codec '{codec_name}' for stream 0:{stream_index}. Skipping.")
+            continue
         try:
             run_shell_command(cmd)
             extracted_subtitles.append(subtitle_file)
@@ -321,8 +376,9 @@ def extract_and_convert_subtitles(input_video, subtitles_dir):
                 'index': idx,
                 'title': stream.get('tags', {}).get('title', ''),
                 'language': stream.get('tags', {}).get('language', ''),
-                'default': '1' if stream.get('disposition', {}).get('default') else '0',
-                'forced': '1' if stream.get('disposition', {}).get('forced') else '0',
+                'default': '1' if stream.get('disposition', {}).get('default', 0) == 1 else '0',
+                'forced': '1' if stream.get('disposition', {}).get('forced', 0) == 1 else '0',
+                'codec': output_codec
             }
             subtitles_metadata.append(metadata)
             logger.info(f"Extracted subtitle stream 0:{stream_index} to {subtitle_file}")
@@ -331,13 +387,21 @@ def extract_and_convert_subtitles(input_video, subtitles_dir):
     return extracted_subtitles, subtitles_metadata
 
 def encode_video(input_video, frames_dir, output_video, config, subtitles_path=None):
+    """Main function to encode the video with or without upscaled frames."""
     logger.info(f"Starting encoding for {input_video}")
     set_encoder_settings(config, input_video)
     subtitles_dir = os.path.join(config['output']['folder'], 'subtitles')
     extracted_subtitles, subtitles_metadata = extract_and_convert_subtitles(input_video, subtitles_dir)
     if subtitles_path and os.path.exists(subtitles_path):
         extracted_subtitles.append(subtitles_path)
-        subtitles_metadata.append({'index': len(subtitles_metadata), 'title': '', 'language': '', 'default': '0', 'forced': '0'})
+        subtitles_metadata.append({
+            'index': len(subtitles_metadata),
+            'title': '',
+            'language': '',
+            'default': '0',
+            'forced': '0',
+            'codec': 'ass'  # Assuming external subtitles are ASS
+        })
         logger.info(f"Including external subtitles: {subtitles_path}")
     if frames_dir and os.path.exists(frames_dir):
         fps = get_video_fps(input_video)
@@ -355,41 +419,52 @@ def encode_video(input_video, frames_dir, output_video, config, subtitles_path=N
     logger.info(f"{Fore.GREEN}Encoding completed for {input_video}")
 
 def assemble_video_without_upscaling(input_video, output_video_path, extracted_subtitles, subtitles_metadata, config):
+    """Assemble the video without upscaling frames, including subtitles and metadata."""
     logger.info(f"Assembling video without upscaling for {input_video}")
-    audio_codec = config['ffmpeg']['audio_codec']
-    audio_bitrate = config['ffmpeg']['audio_bitrate']
+    audio_codec = config['audio_codec']
+    audio_bitrate = config['audio_bitrate']
 
     # Start constructing the FFmpeg command
     cmd = ['ffmpeg', '-y', '-i', input_video]
     for subtitle_file in extracted_subtitles:
         cmd.extend(['-i', subtitle_file])
 
-    # Mapping inputs
+    # Exclude original subtitles from input video
     cmd.extend(['-map', '0:v', '-map', '0:a?'])
+    cmd.extend(['-map', '-0:s'])
     for idx, _ in enumerate(extracted_subtitles):
-        cmd.extend(['-map', f'{idx + 1}:0'])
+        cmd.extend(['-map', f'{idx + 1}:s:0'])
     cmd.extend(['-map', '0:t?'])  # Map attachments (e.g., fonts)
     cmd.extend(['-map_metadata', '0', '-map_chapters', '0'])
 
     # Video encoding options (must be before output file)
-    encoder = config['ffmpeg']['encoder']
-    preset = config['ffmpeg']['preset']
+    encoder = config['encoder']
+    preset = config['preset']
     cmd.extend(['-c:v', encoder, '-preset', preset])
 
-    if 'rc' in config['ffmpeg']:
-        cmd.extend(['-rc:v', config['ffmpeg']['rc']])
-    if 'cq' in config['ffmpeg'] and config['ffmpeg']['cq'] is not None:
-        cmd.extend(['-cq', str(config['ffmpeg']['cq'])])
-    elif 'crf' in config['ffmpeg'] and config['ffmpeg']['crf'] is not None:
-        cmd.extend(['-crf', str(config['ffmpeg']['crf'])])
+    if 'rc' in config:
+        cmd.extend(['-rc:v', config['rc']])
+    if 'cq' in config and config['cq'] is not None:
+        cmd.extend(['-cq:v', str(config['cq'])])
+    elif 'crf' in config and config['crf'] is not None:
+        cmd.extend(['-crf:v', str(config['crf'])])
 
-    if 'target_bitrate' in config['ffmpeg']:
-        cmd.extend(['-b:v', str(config['ffmpeg']['target_bitrate'])])
-        cmd.extend(['-maxrate', str(config['ffmpeg']['maxrate']), '-bufsize', str(config['ffmpeg']['bufsize'])])
+    if 'target_bitrate' in config:
+        cmd.extend(['-b:v', str(config['target_bitrate'])])
+        cmd.extend(['-maxrate', str(config['maxrate']), '-bufsize', str(config['bufsize'])])
 
-    # Audio and subtitle options
+    # Audio options
     cmd.extend(['-c:a', audio_codec, '-b:a', str(audio_bitrate)])
-    cmd.extend(['-c:s', 'copy'])
+
+    # Subtitle options
+    for idx, metadata in enumerate(subtitles_metadata):
+        codec = metadata.get('codec', 'copy')
+        if codec in ['pgs', 'dvd_subtitle']:
+            # For bitmap subtitles, use 'copy'
+            cmd.extend(['-c:s:{}'.format(idx), 'copy'])
+        else:
+            # For text subtitles, set to 'ass'
+            cmd.extend(['-c:s:{}'.format(idx), 'ass'])
     cmd.extend(['-c:t', 'copy'])  # Copy attachments
 
     # Set metadata for subtitle streams
@@ -412,6 +487,7 @@ def assemble_video_without_upscaling(input_video, output_video_path, extracted_s
 
     try:
         logger.info("Starting encoding with FFmpeg...")
+        logger.debug(f"FFmpeg command: {' '.join(map(str, cmd))}")  # Log the full FFmpeg command
         run_shell_command(cmd)
         logger.info("Encoding completed successfully.")
     except subprocess.CalledProcessError as e:
@@ -419,38 +495,47 @@ def assemble_video_without_upscaling(input_video, output_video_path, extracted_s
         raise
 
 def stitch_frames_to_video(frames_dir, output_video_path, fps, extracted_subtitles, subtitles_metadata, config):
+    """Stitch upscaled frames into a video, including audio, subtitles, and metadata."""
     logger.info(f"Stitching frames from {frames_dir} to {output_video_path}")
     frame_pattern = os.path.join(frames_dir, 'frame%08d.png')
-    audio_codec = config['ffmpeg']['audio_codec']
-    audio_bitrate = config['ffmpeg']['audio_bitrate']
+    audio_codec = config['audio_codec']
+    audio_bitrate = config['audio_bitrate']
     cmd = ['ffmpeg', '-y', '-framerate', str(fps), '-i', frame_pattern, '-i', config['input_video']]
     for subtitle_file in extracted_subtitles:
         cmd.extend(['-i', subtitle_file])
-    cmd.extend(['-map', '0:v', '-map', '1:a?'])
+    # Exclude subtitles from input video
+    cmd.extend(['-map', '0:v', '-map', '1:a?', '-map', '-1:s'])
     for idx, _ in enumerate(extracted_subtitles):
-        cmd.extend(['-map', f'{idx + 2}:0'])
+        cmd.extend(['-map', f'{idx + 2}:s:0'])
     cmd.extend(['-map', '1:t?'])
     cmd.extend(['-map_metadata', '1', '-map_chapters', '1'])
 
     # Video encoding options (must be before output file)
-    encoder = config['ffmpeg']['encoder']
-    preset = config['ffmpeg']['preset']
+    encoder = config['encoder']
+    preset = config['preset']
     cmd.extend(['-c:v', encoder, '-preset', preset])
 
-    if 'rc' in config['ffmpeg']:
-        cmd.extend(['-rc:v', config['ffmpeg']['rc']])
-    if 'cq' in config['ffmpeg'] and config['ffmpeg']['cq'] is not None:
-        cmd.extend(['-cq', str(config['ffmpeg']['cq'])])
-    elif 'crf' in config['ffmpeg'] and config['ffmpeg']['crf'] is not None:
-        cmd.extend(['-crf', str(config['ffmpeg']['crf'])])
+    if 'rc' in config:
+        cmd.extend(['-rc:v', config['rc']])
+    if 'cq' in config and config['cq'] is not None:
+        cmd.extend(['-cq:v', str(config['cq'])])
+    elif 'crf' in config and config['crf'] is not None:
+        cmd.extend(['-crf:v', str(config['crf'])])
 
-    if 'target_bitrate' in config['ffmpeg']:
-        cmd.extend(['-b:v', str(config['ffmpeg']['target_bitrate'])])
-        cmd.extend(['-maxrate', str(config['ffmpeg']['maxrate']), '-bufsize', str(config['ffmpeg']['bufsize'])])
+    if 'target_bitrate' in config:
+        cmd.extend(['-b:v', str(config['target_bitrate'])])
+        cmd.extend(['-maxrate', str(config['maxrate']), '-bufsize', str(config['bufsize'])])
 
-    # Audio and subtitle options
+    # Audio options
     cmd.extend(['-c:a', audio_codec, '-b:a', str(audio_bitrate)])
-    cmd.extend(['-c:s', 'copy'])
+
+    # Subtitle options
+    for idx, metadata in enumerate(subtitles_metadata):
+        codec = metadata.get('codec', 'copy')
+        if codec in ['pgs', 'dvd_subtitle']:
+            cmd.extend(['-c:s:{}'.format(idx), 'copy'])
+        else:
+            cmd.extend(['-c:s:{}'.format(idx), 'ass'])
     cmd.extend(['-c:t', 'copy'])  # Copy attachments
 
     # Set metadata for subtitle streams
@@ -473,6 +558,7 @@ def stitch_frames_to_video(frames_dir, output_video_path, fps, extracted_subtitl
 
     try:
         logger.info("Starting encoding with FFmpeg...")
+        logger.debug(f"FFmpeg command: {' '.join(map(str, cmd))}")  # Log the full FFmpeg command
         run_shell_command(cmd)
         logger.info("Encoding completed successfully.")
     except subprocess.CalledProcessError as e:
@@ -480,6 +566,7 @@ def stitch_frames_to_video(frames_dir, output_video_path, fps, extracted_subtitl
         raise
 
 def process_videos(config, input_video, frames_dir):
+    """Process the input video by encoding with or without upscaled frames."""
     output_dir = config['output']['folder']
     output_dir.mkdir(parents=True, exist_ok=True)
     encoded_video_path = output_dir / f"{Path(input_video).stem}_encoded.mkv"
@@ -491,6 +578,7 @@ def process_videos(config, input_video, frames_dir):
     logger.info(f"Video encoding completed for {input_video}.")
 
 def main():
+    """Main function to parse arguments and start the encoding process."""
     import argparse
     parser = argparse.ArgumentParser(description="Encode video with upscaled frames.")
     parser.add_argument('-i', '--input_video', type=str, required=True, help="Input video file")
@@ -512,21 +600,19 @@ def main():
         'output': {
             'folder': Path(args.output).resolve(),
         },
-        'ffmpeg': {
-            'video_codec': args.codec,
-            'audio_codec': 'libopus',
-            'audio_bitrate': None,
-            'preset': 'veryslow',
-            'encoder': '',
-            'hardware_encoder': '',
-            'software_encoder': '',
-            'crf': None,
-            'target_bitrate': None,
-            'maxrate': None,
-            'bufsize': None,
-            'use_crf': True,
-            'quality_preset': args.quality_preset
-        }
+        'video_codec': args.codec,
+        'audio_codec': '',  # Will be set in set_encoder_settings()
+        'audio_bitrate': None,
+        'preset': 'veryslow',
+        'encoder': '',
+        'hardware_encoder': '',
+        'software_encoder': '',
+        'crf': None,
+        'target_bitrate': None,
+        'maxrate': None,
+        'bufsize': None,
+        'use_crf': True,
+        'quality_preset': args.quality_preset
     }
 
     logger.info("Starting video encoding process...")
